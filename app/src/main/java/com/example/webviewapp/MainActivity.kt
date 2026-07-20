@@ -1,5 +1,5 @@
-package com.example.webviewapp
-import io.github.aulalghifary_arch.twa.R
+package io.github.aulalghifary_arch.twa
+
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
