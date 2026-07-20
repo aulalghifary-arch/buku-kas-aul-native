@@ -4,15 +4,28 @@ plugins {
 }
 
 android {
-    namespace 'com.example.webviewapp'
+    // DIUBAH: namespace & applicationId disesuaikan agar nyambung ke listing
+    // Play Console yang sudah ada (bukan lagi com.example.webviewapp)
+    namespace 'io.github.aulalghifary_arch.twa'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.webviewapp"
+        applicationId "io.github.aulalghifary_arch.twa"
         minSdk 24
         targetSdk 34
         versionCode 1
         versionName "1.0"
+    }
+
+    // TAMBAHAN: signingConfigs untuk build release yang bertanda tangan asli
+    // (sebelumnya tidak ada karena pipeline lama cuma build APK debug)
+    signingConfigs {
+        release {
+            storeFile file("upload-keystore.jks")
+            storePassword System.getenv("KEYSTORE_PASSWORD")
+            keyAlias System.getenv("KEY_ALIAS")
+            keyPassword System.getenv("KEY_PASSWORD")
+        }
     }
 
     buildTypes {
@@ -21,6 +34,8 @@ android {
         }
         release {
             minifyEnabled false
+            // TAMBAHAN: pasang signingConfig release di atas
+            signingConfig signingConfigs.release
         }
     }
     compileOptions {
@@ -38,4 +53,6 @@ dependencies {
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    // TAMBAHAN: Play Billing Library
+    implementation 'com.android.billingclient:billing-ktx:9.1.0'
 }
