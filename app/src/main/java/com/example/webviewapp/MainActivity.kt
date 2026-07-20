@@ -28,12 +28,33 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.File
 import java.io.FileOutputStream
 
-class MainActivity : AppCompatActivity() {
+// ===== TAMBAHAN: Play Billing =====
+import com.android.billingclient.api.AcknowledgePurchaseParams
+import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.BillingClientStateListener
+import com.android.billingclient.api.BillingFlowParams
+import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.PendingPurchasesParams
+import com.android.billingclient.api.ProductDetails
+import com.android.billingclient.api.Purchase
+import com.android.billingclient.api.PurchasesUpdatedListener
+import com.android.billingclient.api.QueryProductDetailsParams
+import com.android.billingclient.api.QueryPurchasesParams
+
+// TAMBAHAN: Product ID langganan, sudah cocok dengan yang terdaftar di Play Console
+private const val PREMIUM_PRODUCT_ID = "premium_bulanan"
+
+// TAMBAHAN: ", PurchasesUpdatedListener" ditambahkan di deklarasi class ini
+class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
 
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
     private var swipeRefreshLayout: SwipeRefreshLayout? = null
     private var uploadMessage: ValueCallback<Array<Uri>>? = null
+
+    // ===== TAMBAHAN: Play Billing =====
+    private lateinit var billingClient: BillingClient
+    private var cachedProductDetails: ProductDetails? = null
 
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -135,7 +156,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.addJavascriptInterface(WebAppInterface(this), "Android")
-        webView.loadUrl("https://proyek-kas-prod.vercel.app")
+
+        // DIUBAH: URL sekarang mengarah ke PWA Buku Kas Aul (sebelumnya proyek-kas-prod.vercel.app)
+        webView.loadUrl("https://aulalghifary-arch.github.io/Buku-Kas-Aul-Gen2.5/")
 
 
 
@@ -170,6 +193,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        // TAMBAHAN: siapkan koneksi Play Billing
+        setupBillingClient()
     }
 
     private fun cariSwipeRefresh(view: View): SwipeRefreshLayout? {
@@ -283,6 +309,134 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    // ========================================================================
+    // TAMBAHAN: BAGIAN PLAY BILLING (semuanya baru, tidak mengubah kode di atas)
+    // ========================================================================
+
+    private fun setupBillingClient() {
+        billingClient = BillingClient.newBuilder(this)
+            .setListener(this)
+            .enablePendingPurchases(
+                PendingPurchasesParams.newBuilder()
+                    .enableOneTimeProducts()
+                    .build()
+            )
+            .build()
+
+        billingClient.startConnection(object : BillingClientStateListener {
+            override fun onBillingSetupFinished(billingResult: BillingResult) {
+                if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                    queryProductDetails()
+                    restorePurchases()
+                }
+            }
+
+            override fun onBillingServiceDisconnected() {
+                // Akan dicoba sambung ulang otomatis saat beliPremium() dipanggil lagi
+            }
+        })
+    }
+
+    private fun queryProductDetails() {
+        val product = QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(PREMIUM_PRODUCT_ID)
+            .setProductType(BillingClient.ProductType.SUBS)
+            .build()
+
+        val params = QueryProductDetailsParams.newBuilder()
+            .setProductList(listOf(product))
+            .build()
+
+        billingClient.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
+            if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                val details = productDetailsResult.productDetailsList
+                if (!details.isNullOrEmpty()) {
+                    cachedProductDetails = details[0]
+                }
+            }
+        }
+    }
+
+    private fun restorePurchases() {
+        val params = QueryPurchasesParams.newBuilder()
+            .setProductType(BillingClient.ProductType.SUBS)
+            .build()
+
+        billingClient.queryPurchasesAsync(params) { billingResult, purchases ->
+            if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                val aktif = purchases.any { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+                if (aktif) {
+                    notifyWeb("onPremiumPurchased", "")
+                }
+            }
+        }
+    }
+
+    private fun launchPurchaseFlow() {
+        val productDetails = cachedProductDetails ?: run {
+            notifyWeb("onPremiumError", "Produk belum siap, coba lagi sebentar lagi.")
+            return
+        }
+        val offerToken = productDetails.subscriptionOfferDetails
+            ?.firstOrNull()?.offerToken ?: return
+
+        val productDetailsParamsList = listOf(
+            BillingFlowParams.ProductDetailsParams.newBuilder()
+                .setProductDetails(productDetails)
+                .setOfferToken(offerToken)
+                .build()
+        )
+        val billingFlowParams = BillingFlowParams.newBuilder()
+            .setProductDetailsParamsList(productDetailsParamsList)
+            .build()
+
+        billingClient.launchBillingFlow(this, billingFlowParams)
+    }
+
+    override fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
+        when (billingResult.responseCode) {
+            BillingClient.BillingResponseCode.OK -> {
+                purchases?.forEach { handlePurchase(it) }
+            }
+            BillingClient.BillingResponseCode.USER_CANCELED -> {
+                notifyWeb("onPremiumCancelled", "")
+            }
+            else -> {
+                notifyWeb("onPremiumError", billingResult.debugMessage)
+            }
+        }
+    }
+
+    private fun handlePurchase(purchase: Purchase) {
+        if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+            if (!purchase.isAcknowledged) {
+                val ackParams = AcknowledgePurchaseParams.newBuilder()
+                    .setPurchaseToken(purchase.purchaseToken)
+                    .build()
+                billingClient.acknowledgePurchase(ackParams) {
+                    notifyWeb("onPremiumPurchased", "")
+                }
+            } else {
+                notifyWeb("onPremiumPurchased", "")
+            }
+        }
+    }
+
+    /** Dipanggil dari WebAppInterface.beliPremium() lewat jembatan "Android" yang sudah ada */
+    fun beliPremium() {
+        runOnUiThread { launchPurchaseFlow() }
+    }
+
+    private fun notifyWeb(jsFunctionName: String, message: String) {
+        runOnUiThread {
+            val safeMessage = message.replace("'", "\\'")
+            webView.evaluateJavascript(
+                "if (window.$jsFunctionName) { window.$jsFunctionName('$safeMessage'); }",
+                null
+            )
+        }
+    }
 }
 
 class WebAppInterface(private val mContext: MainActivity) {
@@ -307,5 +461,11 @@ class WebAppInterface(private val mContext: MainActivity) {
     @JavascriptInterface
     fun setTemaStatusBar(modeGelap: Boolean) {
         mContext.terapkanTemaNative(modeGelap)
+    }
+
+    // TAMBAHAN: dipanggil dari script.js lewat Android.beliPremium()
+    @JavascriptInterface
+    fun beliPremium() {
+        mContext.beliPremium()
     }
 }
