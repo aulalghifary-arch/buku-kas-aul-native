@@ -1,5 +1,4 @@
 package io.github.aulalghifary_arch.twa
-
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -24,6 +23,7 @@ import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.File
 import java.io.FileOutputStream
@@ -68,6 +68,16 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // TAMBAHAN: mode edge-to-edge, meniru theming otomatis TWA yang
+        // menyamakan status bar & navigation bar dengan warna header web
+        // (sebelumnya WebView native menampilkan status bar/navigation bar
+        // flat berwarna solid, beda dengan gradient header web -> terlihat
+        // "jahitan" warna yang tidak ada di versi TWA/Bubblewrap). Meta tag
+        // viewport-fit=cover di web sudah disiapkan untuk mode ini, jadi CSS
+        // web yang menangani padding safe-area-nya sendiri.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webView)
@@ -231,7 +241,11 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
             webView.setBackgroundColor(warnaLatar)
             progressBar.progressBackgroundTintList = ColorStateList.valueOf(warnaLatar)
 
-            window.statusBarColor = warnaLatar
+            // DIUBAH: status bar & navigation bar dibuat transparan (bukan warna
+            // flat warnaLatar) supaya gradient header/footer web asli yang tembus
+            // sampai ke ujung layar -- meniru perilaku otomatis TWA.
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 @Suppress("DEPRECATION")
                 window.decorView.systemUiVisibility = if (modeGelap) {
