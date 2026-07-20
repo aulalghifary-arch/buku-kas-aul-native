@@ -7,7 +7,7 @@ android {
     // DIUBAH: namespace & applicationId disesuaikan agar nyambung ke listing
     // Play Console yang sudah ada (bukan lagi com.example.webviewapp)
     namespace 'io.github.aulalghifary_arch.twa'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "io.github.aulalghifary_arch.twa"
