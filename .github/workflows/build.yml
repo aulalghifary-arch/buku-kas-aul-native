@@ -25,6 +25,10 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/upload-keystore.jks
 
+      - name: Verify keystore integrity
+        run: |
+          keytool -list -v -keystore app/upload-keystore.jks -storepass "${{ secrets.KEYSTORE_PASSWORD }}"
+
       # DIUBAH: dari "Build Debug APK" (assembleDebug) menjadi build AAB rilis bertanda tangan
       - name: Build Signed Release AAB
         env:
