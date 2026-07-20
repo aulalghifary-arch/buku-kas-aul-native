@@ -13,8 +13,8 @@ android {
         applicationId "io.github.aulalghifary_arch.twa"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 4
+        versionName "3.0.0"
     }
 
     // TAMBAHAN: signingConfigs untuk build release yang bertanda tangan asli
