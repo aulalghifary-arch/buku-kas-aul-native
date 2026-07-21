@@ -21,9 +21,13 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.File
 import java.io.FileOutputStream
@@ -52,6 +56,9 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
     private var swipeRefreshLayout: SwipeRefreshLayout? = null
     private var uploadMessage: ValueCallback<Array<Uri>>? = null
 
+    // TAMBAHAN: untuk pola "tekan sekali lagi untuk keluar" pada tombol/gesture kembali
+    private var waktuBackTerakhir = 0L
+
     // ===== TAMBAHAN: Play Billing =====
     private lateinit var billingClient: BillingClient
     private var cachedProductDetails: ProductDetails? = null
@@ -69,13 +76,13 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // TAMBAHAN: mode edge-to-edge, meniru theming otomatis TWA yang
-        // menyamakan status bar & navigation bar dengan warna header web
-        // (sebelumnya WebView native menampilkan status bar/navigation bar
-        // flat berwarna solid, beda dengan gradient header web -> terlihat
-        // "jahitan" warna yang tidak ada di versi TWA/Bubblewrap). Meta tag
-        // viewport-fit=cover di web sudah disiapkan untuk mode ini, jadi CSS
-        // web yang menangani padding safe-area-nya sendiri.
+        // TAMBAHAN: wajib dipanggil karena Android 15 (targetSdk 35) MEMAKSA mode
+        // edge-to-edge di semua app -- tidak bisa "dimatikan". Konsekuensinya, ROOT
+        // layout ini sekarang menggambar sampai ke belakang status bar & navigation
+        // bar. Supaya tidak berantakan, area itu dikompensasi manual lewat margin di
+        // bawah (lihat ViewCompat.setOnApplyWindowInsetsListener), BUKAN dengan
+        // membiarkan WebView ikut edge-to-edge (itu sempat dicoba dan bikin
+        // 100vh/100dvh yang dihitung web jadi lebih besar dari versi TWA).
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         setContentView(R.layout.activity_main)
@@ -83,6 +90,60 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
         swipeRefreshLayout = cariSwipeRefresh(findViewById(android.R.id.content))
+
+        // TAMBAHAN: tangani window insets secara manual, meniru persis perilaku
+        // TWA -- TWA/Chrome TIDAK menggambar konten web di belakang status bar/
+        // navigation bar, cuma mewarnai status bar dengan warna solid (theme_color)
+        // agar terlihat menyatu. Sebelumnya sempat dicoba mode "edge-to-edge
+        // sungguhan" (WebView meluas ke belakang system bar + CSS env(safe-area-
+        // inset)), tapi itu bikin 100vh/100dvh yang dilihat web JADI LEBIH BESAR
+        // dari TWA (karena ikut menghitung area status bar & navigation bar),
+        // menyebabkan sisa ruang kosong besar di bawah konten. Fix-nya: progressBar
+        // diberi margin atas setinggi status bar, webView diberi margin bawah
+        // setinggi navigation bar -- sehingga viewport yang dilihat web PERSIS
+        // sebesar TWA (tidak edge-to-edge dari sudut pandang web sama sekali).
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { _, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+
+            val progressParams = progressBar.layoutParams as ViewGroup.MarginLayoutParams
+            progressParams.topMargin = systemBars.top
+            progressBar.layoutParams = progressParams
+
+            val webViewParams = webView.layoutParams as ViewGroup.MarginLayoutParams
+            webViewParams.bottomMargin = systemBars.bottom
+            webView.layoutParams = webViewParams
+
+            insets
+        }
+
+        // TAMBAHAN: tombol/gesture "kembali" bawaan HP sekarang menavigasi riwayat
+        // WebView dulu (seperti browser), lalu kalau tidak ada riwayat sama sekali,
+        // pakai pola "tekan sekali lagi untuk keluar" -- sebelumnya langsung
+        // melempar keluar app tanpa pengecualian apa pun.
+        // CATATAN JUJUR: karena app web ini kemungkinan besar berpindah antar
+        // halaman (Riwayat, Hutang/Piutang, Grafik, dst) lewat state JavaScript
+        // internal -- BUKAN navigasi URL/hash browser sungguhan -- webView.canGoBack()
+        // di bawah ini kemungkinan besar SELALU false di halaman-halaman itu, jadi
+        // tombol kembali belum akan berpindah dari mis. "Grafik" ke "Dashboard".
+        // Kalau itu juga diinginkan, perlu jembatan JS tambahan yang tahu status
+        // halaman aktif di web -- beri tahu saya cara script.js mengatur perpindahan
+        // halaman (variabel currentPage dkk) supaya bisa disambungkan.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                    return
+                }
+                val sekarang = System.currentTimeMillis()
+                if (sekarang - waktuBackTerakhir < 2000) {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                } else {
+                    waktuBackTerakhir = sekarang
+                    Toast.makeText(this@MainActivity, "Tekan sekali lagi untuk keluar", Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
 
         // FIX GARIS PUTIH/ABU-ABU DI BAWAH STATUS BAR (khusus APK):
         // Garis itu adalah <ProgressBar> horizontal di paling atas layout (4dp, selebar
@@ -241,19 +302,27 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
             webView.setBackgroundColor(warnaLatar)
             progressBar.progressBackgroundTintList = ColorStateList.valueOf(warnaLatar)
 
-            // DIUBAH: status bar & navigation bar dibuat transparan (bukan warna
-            // flat warnaLatar) supaya gradient header/footer web asli yang tembus
-            // sampai ke ujung layar -- meniru perilaku otomatis TWA.
-            window.statusBarColor = Color.TRANSPARENT
-            window.navigationBarColor = Color.TRANSPARENT
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                @Suppress("DEPRECATION")
-                window.decorView.systemUiVisibility = if (modeGelap) {
-                    window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-                } else {
-                    window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                }
-            }
+            // DIUBAH: status bar diberi warna SOLID meniru warna awal gradient
+            // header web (--gradient-header di style.css dimulai dari #0B4F45),
+            // BUKAN dibuat transparan. Ini persis cara TWA/Chrome bekerja --
+            // status bar diwarnai flat, bukan ditembusi konten web. Warna ini
+            // sama untuk mode terang maupun gelap karena --gradient-header di
+            // style.css memang tidak berubah antara kedua mode tersebut.
+            window.statusBarColor = Color.parseColor("#0B4F45")
+            // Navigation bar tetap ikut mode gelap/terang halaman (sama seperti
+            // sebelum percobaan edge-to-edge), karena area itu bersebelahan
+            // dengan latar bawah web, bukan dengan header.
+            window.navigationBarColor = warnaLatar
+
+            // DIUBAH: pakai WindowInsetsControllerCompat (pengganti resmi systemUiVisibility
+            // yang deprecated, dan beberapa flag-nya sudah tidak berlaku lagi di Android 15).
+            val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+            // Ikon status bar (jam, baterai, sinyal) SELALU terang/putih, karena latar
+            // status bar sekarang selalu gelap (#0B4F45) terlepas dari mode aplikasi.
+            insetsController.isAppearanceLightStatusBars = false
+            // Ikon navigation bar menyesuaikan warnaLatar: gelap di atas latar terang,
+            // terang di atas latar gelap -- supaya tetap kontras & mudah dibaca.
+            insetsController.isAppearanceLightNavigationBars = !modeGelap
         }
     }
 
