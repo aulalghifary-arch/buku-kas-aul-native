@@ -318,7 +318,14 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
                 Color.parseColor("#f4f7f6")
             }
             webView.setBackgroundColor(warnaLatar)
-            progressBar.progressBackgroundTintList = ColorStateList.valueOf(warnaLatar)
+            // DIUBAH: sebelumnya progressBar ini ditinting warnaLatar (warna latar
+            // HALAMAN, #f4f7f6/#121212) karena dulu posisinya di bawah header, jadi
+            // ikut warna konten. Sekarang progressBar duduk PERSIS di zona header
+            // (di antara latar #0B4F45 milik root layout & header asli WebView),
+            // jadi harus disamakan dengan #0B4F45 juga -- kalau tetap warnaLatar,
+            // di mode gelap ini muncul sebagai garis hitam (#121212) melintang di
+            // tengah header hijau/tealnya.
+            progressBar.progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#0B4F45"))
 
             // DIUBAH: window.statusBarColor & window.navigationBarColor sudah TIDAK
             // BERFUNGSI (no-op) di Android 15 (targetSdk 35) -- pemanggilannya tidak
