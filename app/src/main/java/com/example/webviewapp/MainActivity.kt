@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
 
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
+    private lateinit var navBarSpacer: View
     private var swipeRefreshLayout: SwipeRefreshLayout? = null
     private var uploadMessage: ValueCallback<Array<Uri>>? = null
 
@@ -89,19 +90,22 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
 
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
+        navBarSpacer = findViewById(R.id.navBarSpacer)
         swipeRefreshLayout = cariSwipeRefresh(findViewById(android.R.id.content))
 
         // TAMBAHAN: tangani window insets secara manual, meniru persis perilaku
-        // TWA -- TWA/Chrome TIDAK menggambar konten web di belakang status bar/
-        // navigation bar, cuma mewarnai status bar dengan warna solid (theme_color)
+        // TWA: TWA/Chrome TIDAK menggambar konten web di belakang status bar/
+        // navigation bar, cuma mewarnai area itu dengan warna solid (theme_color)
         // agar terlihat menyatu. Sebelumnya sempat dicoba mode "edge-to-edge
         // sungguhan" (WebView meluas ke belakang system bar + CSS env(safe-area-
         // inset)), tapi itu bikin 100vh/100dvh yang dilihat web JADI LEBIH BESAR
         // dari TWA (karena ikut menghitung area status bar & navigation bar),
         // menyebabkan sisa ruang kosong besar di bawah konten. Fix-nya: progressBar
-        // diberi margin atas setinggi status bar, webView diberi margin bawah
-        // setinggi navigation bar -- sehingga viewport yang dilihat web PERSIS
-        // sebesar TWA (tidak edge-to-edge dari sudut pandang web sama sekali).
+        // diberi margin atas setinggi status bar (area di baliknya menampakkan
+        // android:background root layout, #0B4F45, karena window.statusBarColor
+        // sudah no-op di Android 15). navBarSpacer diberi tinggi = navigation bar
+        // sungguhan, warnanya diatur terpisah lewat terapkanTemaNative() supaya
+        // ikut tema terang/gelap (window.navigationBarColor juga sudah no-op).
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
 
@@ -109,9 +113,9 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
             progressParams.topMargin = systemBars.top
             progressBar.layoutParams = progressParams
 
-            val webViewParams = webView.layoutParams as ViewGroup.MarginLayoutParams
-            webViewParams.bottomMargin = systemBars.bottom
-            webView.layoutParams = webViewParams
+            val navBarParams = navBarSpacer.layoutParams
+            navBarParams.height = systemBars.bottom
+            navBarSpacer.layoutParams = navBarParams
 
             insets
         }
@@ -202,6 +206,20 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
                     })();
                 """.trimIndent()
                 view?.evaluateJavascript(jsScrollSensor, null)
+
+                // TAMBAHAN: WebView melaporkan env(safe-area-inset-top/bottom) berdasarkan
+                // inset window secara keseluruhan, TANPA tahu bahwa progressBar & navBarSpacer
+                // di sisi native SUDAH mengompensasi area status bar/navigation bar duluan.
+                // Tanpa baris ini, --safe-top di style.css (dipakai di .app-header) jadi
+                // DOBEL terhitung -> header/logo/tombol titik-tiga kelihatan turun lebih
+                // jauh dari seharusnya (dibanding versi TWA). Baris ini memaksa kedua
+                // variabel itu ke 0px khusus di app native, karena kompensasi yang
+                // sebenarnya sudah ditangani penuh oleh native.
+                view?.evaluateJavascript(
+                    "document.documentElement.style.setProperty('--safe-top','0px');" +
+                        "document.documentElement.style.setProperty('--safe-bottom','0px');",
+                    null
+                )
             }
         }
 
@@ -302,20 +320,20 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
             webView.setBackgroundColor(warnaLatar)
             progressBar.progressBackgroundTintList = ColorStateList.valueOf(warnaLatar)
 
-            // DIUBAH: status bar diberi warna SOLID meniru warna awal gradient
-            // header web (--gradient-header di style.css dimulai dari #0B4F45),
-            // BUKAN dibuat transparan. Ini persis cara TWA/Chrome bekerja --
-            // status bar diwarnai flat, bukan ditembusi konten web. Warna ini
-            // sama untuk mode terang maupun gelap karena --gradient-header di
-            // style.css memang tidak berubah antara kedua mode tersebut.
-            window.statusBarColor = Color.parseColor("#0B4F45")
-            // Navigation bar tetap ikut mode gelap/terang halaman (sama seperti
-            // sebelum percobaan edge-to-edge), karena area itu bersebelahan
-            // dengan latar bawah web, bukan dengan header.
-            window.navigationBarColor = warnaLatar
+            // DIUBAH: window.statusBarColor & window.navigationBarColor sudah TIDAK
+            // BERFUNGSI (no-op) di Android 15 (targetSdk 35) -- pemanggilannya tidak
+            // error, tapi juga tidak melakukan apa-apa. Warna status bar sekarang
+            // ditangani statis lewat android:background="#0B4F45" di root
+            // activity_main.xml (area itu selalu sama, tidak berubah per tema).
+            // Warna navigation bar ditangani di sini lewat navBarSpacer, View
+            // terpisah yang tingginya sudah disamakan dengan navigation bar
+            // sungguhan lewat ViewCompat.setOnApplyWindowInsetsListener di onCreate.
+            navBarSpacer.setBackgroundColor(warnaLatar)
 
             // DIUBAH: pakai WindowInsetsControllerCompat (pengganti resmi systemUiVisibility
             // yang deprecated, dan beberapa flag-nya sudah tidak berlaku lagi di Android 15).
+            // Ini masih berfungsi normal -- yang no-op cuma pewarnaan latar bar-nya saja,
+            // BUKAN pengaturan warna ikon (isAppearanceLight...) di bawah ini.
             val insetsController = WindowInsetsControllerCompat(window, window.decorView)
             // Ikon status bar (jam, baterai, sinyal) SELALU terang/putih, karena latar
             // status bar sekarang selalu gelap (#0B4F45) terlepas dari mode aplikasi.
