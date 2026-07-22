@@ -1,29 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- DIUBAH: android:background="#0B4F45" ditambahkan di root. Sejak Android 15
+     (targetSdk 35), window.statusBarColor tidak lagi berfungsi (no-op); satu-
+     satunya cara mewarnai area di balik status bar sekarang adalah lewat warna
+     konten app itu sendiri yang "tembus" di baliknya. #0B4F45 ini sama persis
+     dengan warna awal gradient-header di style.css & meta theme-color TWA,
+     jadi menyatu dengan header web begitu WebView-nya mulai. -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#0B4F45">
 
+    <ProgressBar
+        android:id="@+id/progressBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="0dp"
+        android:layout_height="4dp"
+        android:progressDrawable="@drawable/progress_drawable"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/progressBar"
+        app:layout_constraintBottom_toTopOf="@id/navBarSpacer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
-        <ProgressBar
-            android:id="@+id/progressBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="0dp"
-            android:layout_height="4dp"
-            android:progressDrawable="@drawable/progress_drawable"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+    <!-- TAMBAHAN: pengganti area navigation bar. Tingginya diisi otomatis lewat
+         kode (setinggi navigation bar sungguhan) dan warnanya disamakan dengan
+         latar app aktif (terang/gelap) lewat terapkanTemaNative(), karena
+         window.navigationBarColor juga sudah no-op di Android 15. -->
+    <View
+        android:id="@+id/navBarSpacer"
+        android:layout_width="0dp"
+        android:layout_height="24dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
-        <WebView
-            android:id="@+id/webView"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            app:layout_constraintTop_toBottomOf="@id/progressBar"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
-
-    </androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
