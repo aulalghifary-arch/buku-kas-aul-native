@@ -57,5 +57,5 @@ dependencies {
     // resmi window.statusBarColor/navigationBarColor yang sudah deprecated)
     implementation 'androidx.activity:activity-ktx:1.11.0'
     // TAMBAHAN: Play Billing Library
-    implementation 'com.android.billingclient:billing-ktx:9.1.0'
+    implementation 'com.android.billingclient:billing:8.0.0'
 }
