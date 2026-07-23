@@ -13,7 +13,7 @@ android {
         applicationId "io.github.aulalghifary_arch.twa"
         minSdk 24
         targetSdk 36
-        versionCode 11
+        versionCode 12
         versionName "3.0.0"
     }
 
