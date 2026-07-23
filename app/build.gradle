@@ -13,7 +13,7 @@ android {
         applicationId "io.github.aulalghifary_arch.twa"
         minSdk 24
         targetSdk 36
-        versionCode 10
+        versionCode 11
         versionName "3.0.0"
     }
 
@@ -53,6 +53,9 @@ dependencies {
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    // TAMBAHAN: dibutuhkan untuk enableEdgeToEdge() & SystemBarStyle (pengganti
+    // resmi window.statusBarColor/navigationBarColor yang sudah deprecated)
+    implementation 'androidx.activity:activity-ktx:1.11.0'
     // TAMBAHAN: Play Billing Library
     implementation 'com.android.billingclient:billing-ktx:9.1.0'
 }
