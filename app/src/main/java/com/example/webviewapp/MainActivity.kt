@@ -240,7 +240,16 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
                 uploadMessage?.onReceiveValue(null)
                 uploadMessage = filePathCallback
 
+                // DIUBAH: fileChooserParams?.createIntent() bertipe Intent? (nullable),
+                // tapi fileChooserLauncher.launch() sekarang mensyaratkan Intent yang
+                // tidak nullable (lebih ketat sejak activity-ktx dinaikkan versinya).
+                // Kalau intent-nya null (kasus langka), batalkan dengan aman alih-alih
+                // memaksa lolos ke launch() dan gagal compile/crash.
                 val intent = fileChooserParams?.createIntent()
+                if (intent == null) {
+                    uploadMessage = null
+                    return false
+                }
                 try {
                     fileChooserLauncher.launch(intent)
                 } catch (e: Exception) {
