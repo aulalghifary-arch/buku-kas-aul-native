@@ -24,10 +24,10 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.File
 import java.io.FileOutputStream
@@ -77,14 +77,22 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // TAMBAHAN: wajib dipanggil karena Android 15 (targetSdk 35) MEMAKSA mode
-        // edge-to-edge di semua app -- tidak bisa "dimatikan". Konsekuensinya, ROOT
-        // layout ini sekarang menggambar sampai ke belakang status bar & navigation
-        // bar. Supaya tidak berantakan, area itu dikompensasi manual lewat margin di
-        // bawah (lihat ViewCompat.setOnApplyWindowInsetsListener), BUKAN dengan
-        // membiarkan WebView ikut edge-to-edge (itu sempat dicoba dan bikin
-        // 100vh/100dvh yang dihitung web jadi lebih besar dari versi TWA).
-        WindowCompat.setDecorFitsSystemWindows(window, false)
+        // DIUBAH: sebelumnya pakai WindowCompat.setDecorFitsSystemWindows(window, false)
+        // + window.statusBarColor/navigationBarColor manual. Play Console menandai
+        // setStatusBarColor/setNavigationBarColor sebagai API yang sudah deprecated
+        // di Android 15, dan MENYARANKAN enableEdgeToEdge() sebagai gantinya. Bonus:
+        // enableEdgeToEdge() juga menangani versi Android LAMA dengan benar lewat
+        // parameter SystemBarStyle (mengecat scrim solid di device lama yang belum
+        // mendukung status bar transparan) -- ini yang memperbaiki bug "panel
+        // notifikasi putih" yang muncul di sebagian HP tester ber-Android lama.
+        // ROOT layout tetap menggambar sampai ke belakang status bar/navigation bar
+        // (dikompensasi manual lewat margin, lihat ViewCompat.setOnApplyWindowInsetsListener
+        // di bawah), BUKAN dengan membiarkan WebView ikut edge-to-edge (itu sempat
+        // dicoba dan bikin 100vh/100dvh yang dihitung web jadi lebih besar dari TWA).
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.parseColor("#0B4F45")),
+            navigationBarStyle = SystemBarStyle.light(Color.parseColor("#f4f7f6"), Color.parseColor("#f4f7f6"))
+        )
 
         setContentView(R.layout.activity_main)
 
@@ -327,27 +335,29 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
             // tengah header hijau/tealnya.
             progressBar.progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#0B4F45"))
 
-            // DIUBAH: window.statusBarColor & window.navigationBarColor sudah TIDAK
-            // BERFUNGSI (no-op) di Android 15 (targetSdk 35) -- pemanggilannya tidak
-            // error, tapi juga tidak melakukan apa-apa. Warna status bar sekarang
-            // ditangani statis lewat android:background="#0B4F45" di root
-            // activity_main.xml (area itu selalu sama, tidak berubah per tema).
-            // Warna navigation bar ditangani di sini lewat navBarSpacer, View
-            // terpisah yang tingginya sudah disamakan dengan navigation bar
-            // sungguhan lewat ViewCompat.setOnApplyWindowInsetsListener di onCreate.
+            // Warna navigation bar untuk device Android 15+ (di mana area itu
+            // transparan & ditangani navBarSpacer, View terpisah yang tingginya
+            // sudah disamakan dengan navigation bar sungguhan lewat
+            // ViewCompat.setOnApplyWindowInsetsListener di onCreate).
             navBarSpacer.setBackgroundColor(warnaLatar)
 
-            // DIUBAH: pakai WindowInsetsControllerCompat (pengganti resmi systemUiVisibility
-            // yang deprecated, dan beberapa flag-nya sudah tidak berlaku lagi di Android 15).
-            // Ini masih berfungsi normal -- yang no-op cuma pewarnaan latar bar-nya saja,
-            // BUKAN pengaturan warna ikon (isAppearanceLight...) di bawah ini.
-            val insetsController = WindowInsetsControllerCompat(window, window.decorView)
-            // Ikon status bar (jam, baterai, sinyal) SELALU terang/putih, karena latar
-            // status bar sekarang selalu gelap (#0B4F45) terlepas dari mode aplikasi.
-            insetsController.isAppearanceLightStatusBars = false
-            // Ikon navigation bar menyesuaikan warnaLatar: gelap di atas latar terang,
-            // terang di atas latar gelap -- supaya tetap kontras & mudah dibaca.
-            insetsController.isAppearanceLightNavigationBars = !modeGelap
+            // DIUBAH: panggil ulang enableEdgeToEdge() di sini (bukan cuma sekali di
+            // onCreate) supaya warna & ikon status/navigation bar ikut ter-update
+            // setiap kali web melaporkan pergantian mode gelap/terang. Ini SATU
+            // pemanggilan yang menangani baik warna bar (termasuk di Android lama,
+            // lewat parameter scrim SystemBarStyle) MAUPUN warna ikonnya sekaligus --
+            // menggantikan window.statusBarColor/navigationBarColor manual (sudah
+            // deprecated & no-op di Android 15) dan WindowInsetsControllerCompat
+            // manual (masih jalan, tapi jadi redundan setelah ini).
+            val navBarStyle = if (modeGelap) {
+                SystemBarStyle.dark(warnaLatar)
+            } else {
+                SystemBarStyle.light(warnaLatar, warnaLatar)
+            }
+            enableEdgeToEdge(
+                statusBarStyle = SystemBarStyle.dark(Color.parseColor("#0B4F45")),
+                navigationBarStyle = navBarStyle
+            )
         }
     }
 
