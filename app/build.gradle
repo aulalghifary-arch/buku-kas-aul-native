@@ -13,7 +13,7 @@ android {
         applicationId "io.github.aulalghifary_arch.twa"
         minSdk 24
         targetSdk 36
-        versionCode 12
+        versionCode 13
         versionName "3.0.0"
     }
 
@@ -57,5 +57,5 @@ dependencies {
     // resmi window.statusBarColor/navigationBarColor yang sudah deprecated)
     implementation 'androidx.activity:activity-ktx:1.11.0'
     // TAMBAHAN: Play Billing Library
-    implementation 'com.android.billingclient:billing:8.0.0'
+    implementation 'com.android.billingclient:billing-ktx:9.1.0'
 }
