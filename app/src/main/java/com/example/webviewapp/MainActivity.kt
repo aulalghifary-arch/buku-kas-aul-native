@@ -240,18 +240,25 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
                 uploadMessage?.onReceiveValue(null)
                 uploadMessage = filePathCallback
 
-                // DIUBAH: fileChooserParams?.createIntent() bertipe Intent? (nullable),
-                // tapi fileChooserLauncher.launch() sekarang mensyaratkan Intent yang
-                // tidak nullable (lebih ketat sejak activity-ktx dinaikkan versinya).
-                // Kalau intent-nya null (kasus langka), batalkan dengan aman alih-alih
-                // memaksa lolos ke launch() dan gagal compile/crash.
-                val intent = fileChooserParams?.createIntent()
-                if (intent == null) {
-                    uploadMessage = null
-                    return false
+                // DIUBAH: sebelumnya pakai fileChooserParams?.createIntent() -- itu
+                // menerjemahkan atribut accept=".json" dari web ke filter tipe file
+                // secara OTOMATIS, tapi terjemahan ini terbukti TIDAK KONSISTEN antar
+                // merek HP/file manager: di sebagian HP hasil pilihan file tidak
+                // pernah kembali ke WebView sama sekali, di HP lain filternya malah
+                // kebobolan (bisa pilih file apapun, bukan cuma .json). Satu-satunya
+                // <input type="file"> di seluruh app ini memang khusus untuk restore
+                // backup JSON, jadi lebih aman bikin Intent sendiri secara eksplisit
+                // (bukan mengandalkan terjemahan otomatis itu) + bungkus lewat
+                // Intent.createChooser() supaya perilakunya konsisten di semua HP.
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain", "text/json"))
                 }
+                val chooserIntent = Intent.createChooser(intent, "Pilih file backup (.json)")
+
                 try {
-                    fileChooserLauncher.launch(intent)
+                    fileChooserLauncher.launch(chooserIntent)
                 } catch (e: Exception) {
                     uploadMessage = null
                     Toast.makeText(this@MainActivity, "Gagal membuka file manager", Toast.LENGTH_SHORT).show()
