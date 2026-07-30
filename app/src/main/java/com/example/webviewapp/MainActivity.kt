@@ -12,6 +12,7 @@ import android.os.Environment
 import android.print.PrintAttributes
 import android.print.PrintManager
 import android.util.Base64
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -240,25 +241,18 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
                 uploadMessage?.onReceiveValue(null)
                 uploadMessage = filePathCallback
 
-                // DIUBAH: sebelumnya pakai fileChooserParams?.createIntent() -- itu
-                // menerjemahkan atribut accept=".json" dari web ke filter tipe file
-                // secara OTOMATIS, tapi terjemahan ini terbukti TIDAK KONSISTEN antar
-                // merek HP/file manager: di sebagian HP hasil pilihan file tidak
-                // pernah kembali ke WebView sama sekali, di HP lain filternya malah
-                // kebobolan (bisa pilih file apapun, bukan cuma .json). Satu-satunya
-                // <input type="file"> di seluruh app ini memang khusus untuk restore
-                // backup JSON, jadi lebih aman bikin Intent sendiri secara eksplisit
-                // (bukan mengandalkan terjemahan otomatis itu) + bungkus lewat
-                // Intent.createChooser() supaya perilakunya konsisten di semua HP.
-                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain", "text/json"))
+                // DIUBAH: fileChooserParams?.createIntent() bertipe Intent? (nullable),
+                // tapi fileChooserLauncher.launch() sekarang mensyaratkan Intent yang
+                // tidak nullable (lebih ketat sejak activity-ktx dinaikkan versinya).
+                // Kalau intent-nya null (kasus langka), batalkan dengan aman alih-alih
+                // memaksa lolos ke launch() dan gagal compile/crash.
+                val intent = fileChooserParams?.createIntent()
+                if (intent == null) {
+                    uploadMessage = null
+                    return false
                 }
-                val chooserIntent = Intent.createChooser(intent, "Pilih file backup (.json)")
-
                 try {
-                    fileChooserLauncher.launch(chooserIntent)
+                    fileChooserLauncher.launch(intent)
                 } catch (e: Exception) {
                     uploadMessage = null
                     Toast.makeText(this@MainActivity, "Gagal membuka file manager", Toast.LENGTH_SHORT).show()
@@ -277,22 +271,44 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
 
         webView.setDownloadListener { url, _, _, _, _ ->
             if (url.startsWith("blob:") || url.startsWith("data:")) {
+                // DIUBAH: sebelumnya kalau xhr.status != 200 (atau blob: URL-nya sudah
+                // keburu di-revoke oleh halaman web sebelum sempat diambil ulang di sini),
+                // kode ini diam saja -- tidak ada toast sukses maupun gagal. Efeknya,
+                // backup terasa "berhasil" (toast pemrosesan muncul) padahal file-nya
+                // TIDAK PERNAH benar-benar tersimpan. Sekarang setiap jalur gagal
+                // dilaporkan balik ke native lewat Android.prosesDownloadGagal(),
+                // supaya kegagalan kelihatan alih-alih diam-diam menghilang.
                 val jsDataConverter = """
                     (function() {
-                        var xhr = new XMLHttpRequest();
-                        xhr.open('GET', '$url', true);
-                        xhr.responseType = 'blob';
-                        xhr.onload = function() {
-                            if (xhr.status === 200) {
-                                var reader = new FileReader();
-                                reader.readAsDataURL(xhr.response);
-                                reader.onloadend = function() {
-                                    var base64Data = reader.result;
-                                    Android.prosesDownload(base64Data);
+                        try {
+                            var xhr = new XMLHttpRequest();
+                            xhr.open('GET', '$url', true);
+                            xhr.responseType = 'blob';
+                            xhr.timeout = 15000;
+                            xhr.onload = function() {
+                                if (xhr.status === 200) {
+                                    var reader = new FileReader();
+                                    reader.onloadend = function() {
+                                        Android.prosesDownload(reader.result);
+                                    };
+                                    reader.onerror = function() {
+                                        Android.prosesDownloadGagal('FileReader error saat membaca blob');
+                                    };
+                                    reader.readAsDataURL(xhr.response);
+                                } else {
+                                    Android.prosesDownloadGagal('XHR status ' + xhr.status + ' saat mengambil ulang data blob');
                                 }
-                            }
-                        };
-                        xhr.send();
+                            };
+                            xhr.onerror = function() {
+                                Android.prosesDownloadGagal('XHR gagal mengambil blob (URL kemungkinan sudah tidak valid/di-revoke)');
+                            };
+                            xhr.ontimeout = function() {
+                                Android.prosesDownloadGagal('Timeout saat mengambil data blob');
+                            };
+                            xhr.send();
+                        } catch (err) {
+                            Android.prosesDownloadGagal('Exception JS: ' + err.message);
+                        }
                     })();
                 """.trimIndent()
                 webView.evaluateJavascript(jsDataConverter, null)
@@ -390,6 +406,34 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
         }
     }
 
+    // TAMBAHAN: helper bersama yang benar-benar menulis byte ke folder Download.
+    // Dipakai baik oleh simpanFile() (alur lama, lewat trik blob) maupun
+    // simpanTeksKeUnduhan() (alur baru, dipanggil langsung dari JS). Kalau gagal,
+    // MELEMPAR Exception ke pemanggil, alih-alih gagal diam-diam seperti sebelumnya
+    // (poin utamanya: kegagalan harus kelihatan, bukan tersembunyi).
+    private fun tulisByteKeDownloads(fileName: String, mimeType: String, bytes: ByteArray) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = contentResolver
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                ?: throw java.io.IOException("MediaStore menolak membuat entri file (insert() -> null)")
+            resolver.openOutputStream(uri)?.use { outputStream ->
+                outputStream.write(bytes)
+            } ?: throw java.io.IOException("Tidak bisa membuka output stream ke $uri")
+        } else {
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            val file = File(downloadsDir, fileName)
+            FileOutputStream(file).use { outputStream ->
+                outputStream.write(bytes)
+            }
+        }
+    }
+
     fun simpanFile(base64Data: String) {
         try {
             val mimeType = if (base64Data.contains(";")) {
@@ -412,35 +456,78 @@ class MainActivity : AppCompatActivity(), PurchasesUpdatedListener {
             val fileName = "BukuKas_${System.currentTimeMillis()}$extension"
             val mimeTypeToSave = if (extension == ".pdf") "application/pdf" else if (extension == ".json") "application/json" else "application/octet-stream"
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = contentResolver
-                val contentValues = android.content.ContentValues().apply {
-                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeTypeToSave)
-                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                }
-                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                uri?.let {
-                    resolver.openOutputStream(it)?.use { outputStream ->
-                        outputStream.write(fileBytes)
-                    }
-                }
-            } else {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val file = File(downloadsDir, fileName)
-                FileOutputStream(file).use { outputStream ->
-                    outputStream.write(fileBytes)
-                }
-            }
+            // DIUBAH: sekarang lewat helper tulisByteKeDownloads() yang sama dipakai
+            // simpanTeksKeUnduhan(); kalau gagal, Exception dilempar ke catch di bawah
+            // (dulu: kalau uri null atau openOutputStream null, fungsi ini diam saja
+            // dan tetap menampilkan toast "Berhasil!" walau tidak ada apa pun ditulis).
+            tulisByteKeDownloads(fileName, mimeTypeToSave, fileBytes)
 
             runOnUiThread {
                 Toast.makeText(this, "Berhasil! Cek folder Download di HP Anda.", Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            Log.e("BukuKasAul", "simpanFile() gagal", e)
             runOnUiThread {
-                Toast.makeText(this, "Gagal menyimpan file ke memori", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Gagal menyimpan file ke memori: ${e.message}", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    // TAMBAHAN: jalur simpan BARU khusus data teks (mis. JSON backup), dipanggil
+    // LANGSUNG dari web lewat Android.simpanTeksLangsung(...) di WebAppInterface --
+    // TANPA Blob/URL.createObjectURL/blob: URL sama sekali.
+    //
+    // Kenapa ini penting: di TWA, tombol download blob: ditangani langsung oleh
+    // Chrome sehingga selalu berhasil. Di WebView native biasa, tidak ada penanganan
+    // blob: bawaan -- makanya ada trik setDownloadListener()+XHR di atas yang
+    // mengambil ULANG isi blob: URL dari sisi JS setelah onDownloadStart terpanggil.
+    // Trik itu punya celah waktu: kalau halaman web memanggil URL.revokeObjectURL()
+    // segera setelah tombol download diklik (pola umum untuk membersihkan memori),
+    // blob-nya sudah tidak valid lagi saat kode di atas mencoba mengambil ulang
+    // isinya. XHR gagal, tidak ada file tersimpan -- tapi toast "Memproses file
+    // dokumen..." sudah kadung tampil duluan, jadi terasa seperti berhasil padahal
+    // tidak ada yang benar-benar tersimpan. Ini yang paling cocok menjelaskan laporan
+    // "proses backup berhasil tapi file json tidak ditemukan".
+    //
+    // Jalur ini menghilangkan celah itu sepenuhnya: data JSON dikirim sebagai String
+    // biasa lewat JS bridge, langsung ditulis ke file dalam satu langkah sinkron --
+    // tanpa Blob, tanpa blob: URL, tanpa proses ambil-ulang asinkron yang rawan gagal.
+    fun simpanTeksKeUnduhan(teks: String, namaFile: String) {
+        try {
+            val namaFileAman = (if (namaFile.isBlank()) {
+                "BukuKas_Backup_${System.currentTimeMillis()}.json"
+            } else {
+                namaFile
+            }).replace(Regex("[^A-Za-z0-9._-]"), "_")
+
+            val mimeType = when {
+                namaFileAman.endsWith(".json", ignoreCase = true) -> "application/json"
+                namaFileAman.endsWith(".csv", ignoreCase = true) -> "text/csv"
+                else -> "text/plain"
+            }
+
+            tulisByteKeDownloads(namaFileAman, mimeType, teks.toByteArray(Charsets.UTF_8))
+
+            runOnUiThread {
+                Toast.makeText(this, "Backup berhasil disimpan: $namaFileAman", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Log.e("BukuKasAul", "simpanTeksKeUnduhan() gagal", e)
+            runOnUiThread {
+                Toast.makeText(this, "Gagal menyimpan backup: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // TAMBAHAN: dipanggil dari JS (lewat Android.prosesDownloadGagal di
+    // jsDataConverter pada setDownloadListener) kalau proses ambil-ulang blob:
+    // gagal, supaya kegagalan kelihatan ke pengguna alih-alih diam tanpa penjelasan.
+    fun tampilkanErrorDownload(pesan: String) {
+        Log.e("BukuKasAul", "Gagal memproses blob download: $pesan")
+        runOnUiThread {
+            Toast.makeText(this, "Gagal menyimpan file: $pesan", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -582,6 +669,23 @@ class WebAppInterface(private val mContext: MainActivity) {
     @JavascriptInterface
     fun prosesDownload(base64Data: String) {
         mContext.simpanFile(base64Data)
+    }
+
+    // TAMBAHAN: dipanggil dari jsDataConverter di setDownloadListener kalau
+    // pengambilan-ulang blob: gagal (mis. sudah di-revoke), supaya kegagalan
+    // dilaporkan ke pengguna alih-alih diam saja.
+    @JavascriptInterface
+    fun prosesDownloadGagal(pesan: String) {
+        mContext.tampilkanErrorDownload(pesan)
+    }
+
+    // TAMBAHAN: jembatan simpan-langsung untuk data teks/JSON (dipakai backup).
+    // Panggil dari script.js: Android.simpanTeksLangsung(JSON.stringify(data), 'nama-file.json')
+    // Tidak lewat Blob/blob: URL sama sekali -> tidak kena celah waktu revoke
+    // seperti jalur prosesDownload() di atas.
+    @JavascriptInterface
+    fun simpanTeksLangsung(teks: String, namaFile: String) {
+        mContext.simpanTeksKeUnduhan(teks, namaFile)
     }
 
     // Jembatan khusus untuk menerima data posisi scroll dari website
